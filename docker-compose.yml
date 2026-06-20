@@ -1,0 +1,41 @@
+services:
+  app:
+    build: .
+    container_name: fritzie_app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: mysql://fritzie:fritzie123@db:3306/fritzie_dashboard
+      APP_URL: ${APP_URL:-http://localhost:3000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - task_uploads:/app/storage
+
+  db:
+    image: mysql:8.0
+    container_name: fritzie_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: fritzie_dashboard
+      MYSQL_USER: fritzie
+      MYSQL_PASSWORD: fritzie123
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 10s
+      retries: 10
+      interval: 5s
+
+volumes:
+  mysql_data:
+  task_uploads:

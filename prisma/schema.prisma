@@ -1,0 +1,250 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Locations / Clients ──────────────────────────────────────────────────────
+model Location {
+  id           String         @id @default(uuid())
+  name         String
+  gbpId        String?        @unique @map("gbp_id") @db.VarChar(255)
+  address      String?        @db.VarChar(500)
+  phone        String?        @db.VarChar(50)
+  website      String?        @db.VarChar(500)
+  campaign     String?
+  status       LocationStatus @default(active)
+  gbpConnected Boolean        @default(false) @map("gbp_connected")
+  gbpRating    Float?         @map("gbp_rating")
+  gbpReviewCount Int          @default(0) @map("gbp_review_count")
+  lastSynced   DateTime?      @map("last_synced")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+  reviews      Review[]
+  tasks        Task[]
+  patientList  PatientList?
+
+  @@map("locations")
+}
+
+// ─── Campaigns ────────────────────────────────────────────────────────────────
+model Campaign {
+  id         String         @id @default(uuid())
+  name       String
+  status     CampaignStatus @default(active)
+  emailsSent Int            @default(0) @map("emails_sent")
+  openRate   Decimal        @default(0) @db.Decimal(5, 2) @map("open_rate")
+  createdAt  DateTime       @default(now()) @map("created_at")
+  updatedAt  DateTime       @updatedAt @map("updated_at")
+
+  @@map("campaigns")
+}
+
+// ─── Reviews ──────────────────────────────────────────────────────────────────
+model Review {
+  id         String          @id @default(uuid())
+  locationId String?         @map("location_id")
+  reviewer   String?
+  stars      Int             @db.TinyInt
+  reviewText String?         @db.Text @map("review_text")
+  sentiment  ReviewSentiment @default(neutral)
+  replied    Boolean         @default(false)
+  replyText  String?         @db.Text @map("reply_text")
+  campaign   String?
+  reviewDate DateTime?       @map("review_date")
+  createdAt  DateTime        @default(now()) @map("created_at")
+  location   Location?       @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  @@map("reviews")
+}
+
+// ─── Tasks ────────────────────────────────────────────────────────────────────
+model Task {
+  id          String          @id @default(uuid())
+  title       String
+  description String?         @db.Text
+  status      TaskStatus      @default(backlog)
+  clientId    String?         @map("client_id")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+  client      Location?       @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  checklists  TaskChecklist[]
+  files       TaskFile[]
+
+  @@map("tasks")
+}
+
+model TaskChecklist {
+  id        String  @id @default(uuid())
+  taskId    String  @map("task_id")
+  text      String
+  completed Boolean @default(false)
+  sortOrder Int     @default(0) @map("sort_order")
+  task      Task    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@map("task_checklists")
+}
+
+model TaskFile {
+  id        String   @id @default(uuid())
+  taskId    String   @map("task_id")
+  fileName  String   @map("file_name")
+  fileUrl   String   @map("file_url") @db.VarChar(1000)
+  fileSize  Int?     @map("file_size")
+  mimeType  String?  @map("mime_type") @db.VarChar(100)
+  createdAt DateTime @default(now()) @map("created_at")
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@map("task_files")
+}
+
+// ─── Patient Lists ────────────────────────────────────────────────────────────
+model PatientList {
+  id              String    @id @default(uuid())
+  locationId      String    @unique @map("location_id")
+  sheetLink       String    @map("sheet_link") @db.VarChar(1000)
+  nameColumn      String?   @map("name_column") @db.VarChar(255)
+  emailColumn     String?   @map("email_column") @db.VarChar(255)
+  lastImportedAt  DateTime? @map("last_imported_at")
+  lastFetchedAt   DateTime? @map("last_fetched_at")
+  lastCampaignRan DateTime? @map("last_campaign_ran")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  location        Location  @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  patients        Patient[]
+
+  @@map("patient_lists")
+}
+
+model Patient {
+  id            String      @id @default(uuid())
+  patientListId String      @map("patient_list_id")
+  name          String
+  email         String
+  isNew         Boolean     @default(true) @map("is_new")
+  importedAt    DateTime    @default(now()) @map("imported_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+  patientList   PatientList @relation(fields: [patientListId], references: [id], onDelete: Cascade)
+
+  @@unique([patientListId, email])
+  @@map("patients")
+}
+
+// ─── Auth / Settings ──────────────────────────────────────────────────────────
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  name         String
+  passwordHash String    @map("password_hash") @db.VarChar(500)
+  role         UserRole  @default(member)
+  status       UserStatus @default(active)
+  lastLoginAt  DateTime? @map("last_login_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  invitesSent  Invite[]  @relation("InviteSender")
+
+  @@map("users")
+}
+
+model Invite {
+  id          String       @id @default(uuid())
+  email       String
+  role        UserRole     @default(member)
+  tokenHash   String       @unique @map("token_hash") @db.VarChar(500)
+  status      InviteStatus @default(pending)
+  expiresAt   DateTime     @map("expires_at")
+  acceptedAt  DateTime?    @map("accepted_at")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  invitedById String?      @map("invited_by_id")
+  invitedBy   User?        @relation("InviteSender", fields: [invitedById], references: [id], onDelete: SetNull)
+
+  @@map("invites")
+}
+
+model AppSetting {
+  key       String   @id
+  value     String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("app_settings")
+}
+
+model DailySummaryLog {
+  id          String   @id @default(uuid())
+  status      SummaryStatus
+  message     String?  @db.Text
+  payload     String?  @db.Text
+  deliveredAt DateTime @default(now()) @map("delivered_at")
+
+  @@map("daily_summary_logs")
+}
+
+model EmailOtp {
+  id         String    @id @default(uuid())
+  userId     String    @map("user_id")
+  email      String
+  codeHash   String    @map("code_hash") @db.VarChar(500)
+  purpose    OtpPurpose @default(email_change)
+  expiresAt  DateTime  @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([userId, email, purpose])
+  @@map("email_otps")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+enum UserRole {
+  super_admin
+  admin
+  member
+}
+
+enum UserStatus {
+  active
+  disabled
+}
+
+enum InviteStatus {
+  pending
+  accepted
+  revoked
+}
+
+enum SummaryStatus {
+  success
+  failed
+}
+
+enum OtpPurpose {
+  email_change
+}
+
+enum LocationStatus {
+  active
+  inactive
+  needs_attention
+}
+
+enum CampaignStatus {
+  active
+  ended
+  draft
+}
+
+enum ReviewSentiment {
+  positive
+  neutral
+  negative
+}
+
+enum TaskStatus {
+  backlog
+  in_progress
+  in_review
+  done
+}
