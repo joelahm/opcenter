@@ -226,7 +226,8 @@ export default function SettingsView({ initialData }: { initialData: SettingsDat
       const res = await fetch('/api/settings/email/test', { method: 'POST' })
       const data = await res.json()
       if (!data.success) throw new Error(data.error || 'Email test failed')
-      setStatus(data.delivered ? 'Test email sent' : 'Dev email logged to server console')
+      const reference = data.deliveryId ? ` (reference ${data.deliveryId})` : ''
+      setStatus(data.delivered ? `Test email sent${reference}` : `Email delivery is not configured${reference}`)
     } catch (e: any) {
       setStatus(e.message || 'Email test failed')
     }
@@ -455,14 +456,15 @@ export default function SettingsView({ initialData }: { initialData: SettingsDat
 
           <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-xs text-gray-500 space-y-2">
             <div className="font-semibold text-gray-700">Google Cloud setup</div>
-            <div>1. Create an OAuth Client ID for a Web application.</div>
-            <div>2. Add this authorized redirect URI:</div>
+            <div>1. Enable the Gmail API in your Google Cloud project.</div>
+            <div>2. Create an OAuth Client ID for a Web application.</div>
+            <div>3. Add this authorized redirect URI:</div>
             <input
               readOnly
               value={gmail.redirect_uri}
               className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-[11px] font-mono text-gray-600"
             />
-            <div>3. Save the client ID and secret here.</div>
+            <div>4. Save the client ID and secret here.</div>
             <div>4. Click Connect Gmail and approve the Gmail permission.</div>
           </div>
         </div>

@@ -15,7 +15,11 @@ export async function POST() {
       text:    'Your Gmail OAuth email setup is working.',
     })
 
-    return NextResponse.json({ success: true, delivered: result.delivered })
+    return NextResponse.json({
+      success: true,
+      delivered: result.delivered,
+      deliveryId: result.deliveryId,
+    })
   } catch (error: any) {
     console.error('Email test error:', error)
     return NextResponse.json({ success: false, error: error?.message || 'Failed to send test email' }, { status: 500 })
