@@ -63,6 +63,17 @@ export default function AddClientModal({ mode = 'add', client = null, onClose, o
     if (mapsReady) initAutocomplete()
   }, [mapsReady, initAutocomplete])
 
+  useEffect(() => {
+    if (window.google?.maps?.places) setMapsReady(true)
+
+    return () => {
+      if (autocompleteRef.current && window.google?.maps?.event) {
+        window.google.maps.event.clearInstanceListeners(autocompleteRef.current)
+      }
+      autocompleteRef.current = null
+    }
+  }, [])
+
   // Focus the input once the modal mounts
   useEffect(() => {
     setTimeout(() => inputRef.current?.focus(), 100)
@@ -107,7 +118,7 @@ export default function AddClientModal({ mode = 'add', client = null, onClose, o
         <Script
           src={`https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places`}
           strategy="afterInteractive"
-          onLoad={() => setMapsReady(true)}
+          onReady={() => setMapsReady(true)}
           onError={() => setError('Google Places failed to load. Check NEXT_PUBLIC_GOOGLE_MAPS_API_KEY and API restrictions.')}
         />
       )}

@@ -78,6 +78,7 @@ function isAuthorized(req: NextRequest, session: SessionPayload) {
   if (path === '/api/clients' && method !== 'GET') return isAdmin(session.role)
   if (path === '/api/clients/import') return isAdmin(session.role)
   if (path === '/api/reviews' && method === 'POST') return isAdmin(session.role)
+  if (path.startsWith('/api/gbp-reviews/') && method !== 'GET') return isAdmin(session.role)
   if (path.startsWith('/api/tasks/') && method === 'DELETE') return isAdmin(session.role)
 
   return true

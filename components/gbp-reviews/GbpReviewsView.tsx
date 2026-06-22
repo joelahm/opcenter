@@ -32,6 +32,20 @@ interface GbpReviewData {
   chartData: any[]
 }
 
+interface RefetchResult {
+  message: string
+  total_review_count: number
+  stored_review_count: number
+  new_review_count: number
+  google_reviews_fetched: number
+  serpapi_reviews_fetched: number
+  serpapi_reviews_added: number
+  api_calls_used: number
+  quota_remaining: number | null
+  pages_fetched: number
+  backfill_complete: boolean
+}
+
 function Stars({ count }: { count: number }) {
   return (
     <span className="text-xs tracking-wider whitespace-nowrap">
@@ -128,12 +142,65 @@ function SearchModal({
   )
 }
 
+function RefetchResultModal({ result, onClose }: { result: RefetchResult; onClose: () => void }) {
+  const metrics = [
+    ['Total reviews', result.total_review_count],
+    ['Stored reviews', result.stored_review_count],
+    ['New reviews', result.new_review_count],
+    ['SerpApi calls', result.api_calls_used],
+    ['Pages fetched', result.pages_fetched],
+    ['Quota remaining', result.quota_remaining ?? 'Unavailable'],
+  ]
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-lg overflow-hidden rounded-lg bg-white shadow-2xl"
+        onClick={event => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between border-b border-gray-100 px-5 py-4">
+          <div>
+            <div className="text-sm font-semibold text-gray-900">Review refetch complete</div>
+            <div className="mt-1 text-xs text-gray-500">{result.message}</div>
+          </div>
+          <button
+            onClick={onClose}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100"
+            title="Close"
+          >
+            <X size={15} />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-px bg-gray-100 sm:grid-cols-3">
+          {metrics.map(([label, value]) => (
+            <div key={label} className="bg-white px-4 py-3">
+              <div className="font-mono text-lg font-semibold text-gray-900">{value}</div>
+              <div className="mt-0.5 text-[11px] text-gray-500">{label}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex items-center justify-between border-t border-gray-100 px-5 py-4">
+          <div className="text-xs text-gray-500">
+            Google: {result.google_reviews_fetched} fetched · SerpApi: {result.serpapi_reviews_fetched} fetched, {result.serpapi_reviews_added} added
+          </div>
+          <span className={`text-[10px] font-bold uppercase ${result.backfill_complete ? 'text-green-600' : 'text-amber-600'}`}>
+            {result.backfill_complete ? 'Backfill complete' : 'Partial backfill'}
+          </span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function GbpReviewsView({ initialData }: { initialData: GbpReviewData }) {
   const [data, setData] = useState(initialData)
   const [showSearch, setShowSearch] = useState(false)
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [refetchResult, setRefetchResult] = useState<RefetchResult | null>(null)
 
   const selectedIndex = useMemo(() => {
     if (!data.selected) return -1
@@ -161,13 +228,15 @@ export default function GbpReviewsView({ initialData }: { initialData: GbpReview
 
     setLoading(true)
     setMessage(null)
+    setRefetchResult(null)
 
     try {
-      const res = await fetch(`/api/clients/${data.selected.id}/sync`, { method: 'POST' })
+      const res = await fetch(`/api/gbp-reviews/${data.selected.id}/refetch`, { method: 'POST' })
       const json = await res.json()
       if (!json.success) throw new Error(json.error || 'Refetch failed')
       await loadLocation(data.selected.id)
       setMessage(json.message || 'Reviews refetched')
+      setRefetchResult(json)
     } catch (e: any) {
       setMessage(e.message || 'Refetch failed')
       setLoading(false)
@@ -291,11 +360,13 @@ export default function GbpReviewsView({ initialData }: { initialData: GbpReview
             ) : data.reviews.map(review => (
               <div
                 key={review.id}
-                className="grid grid-cols-[1.1fr_0.8fr_2.2fr_0.8fr_0.8fr_0.9fr] gap-3 px-4 py-3 items-center hover:bg-gray-50/70 transition-colors"
+                className="grid grid-cols-[1.1fr_0.8fr_2.2fr_0.8fr_0.8fr_0.9fr] gap-3 px-4 py-3 items-start hover:bg-gray-50/70 transition-colors"
               >
                 <span className="text-sm font-medium text-gray-900 truncate">{review.reviewer || 'Google user'}</span>
                 <Stars count={review.stars} />
-                <span className="text-xs text-gray-500 truncate">{review.review_text || 'No review text'}</span>
+                <p className="min-w-0 text-xs text-gray-500 leading-relaxed whitespace-pre-wrap break-words">
+                  {review.review_text || 'No review text'}
+                </p>
                 <SentimentBadge sentiment={review.sentiment} />
                 <span className={`w-fit text-[10px] font-bold px-1.5 py-0.5 rounded font-mono ${
                   review.replied ? 'bg-gray-100 text-gray-500' : 'bg-red-100 text-red-600'
@@ -323,6 +394,10 @@ export default function GbpReviewsView({ initialData }: { initialData: GbpReview
             loadLocation(location.id)
           }}
         />
+      )}
+
+      {refetchResult && (
+        <RefetchResultModal result={refetchResult} onClose={() => setRefetchResult(null)} />
       )}
     </>
   )

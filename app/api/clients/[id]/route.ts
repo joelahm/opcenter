@@ -46,6 +46,7 @@ export async function GET(
         gbp_id:           client.gbpId,
         gbp_rating:       client.gbpRating,
         gbp_review_count: client.gbpReviewCount,
+        gbp_new_review_count: client.gbpNewReviewCount,
         last_synced:      client.lastSynced?.toISOString() ?? null,
         total_reviews:    totalReviews,
         unreplied_count:  unrepliedCount,

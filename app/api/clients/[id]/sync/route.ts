@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/db'
-import { ReviewSentiment } from '@prisma/client'
 import {
   fetchAllGbpReviews,
   findManagedLocationByPlaceId,
@@ -10,16 +9,9 @@ import {
   setSetting,
 } from '@/lib/gbp-oauth'
 import { checkRateLimit } from '@/lib/rate-limit'
-
-interface NormalizedReview {
-  externalId?: string
-  reviewer: string
-  stars: number
-  text: string | null
-  reviewDate: Date
-  replied: boolean
-  replyText: string | null
-}
+import { calculateNewReviewCount } from '@/lib/gbp-review-delta'
+import { fetchGooglePlacesReviewSnapshot } from '@/lib/google-places-reviews'
+import { NormalizedReview, saveNormalizedReviews } from '@/lib/review-sync'
 
 const STAR_VALUES: Record<string, number> = {
   ONE: 1,
@@ -29,95 +21,12 @@ const STAR_VALUES: Record<string, number> = {
   FIVE: 5,
 }
 
-function sentimentFromRating(rating: number): ReviewSentiment {
-  if (rating >= 4) return 'positive'
-  if (rating === 3) return 'neutral'
-  return 'negative'
-}
-
 function formatAddress(address: any) {
   if (!address) return undefined
   const lines = Array.isArray(address.addressLines) ? address.addressLines : []
   return [lines.join(', '), address.locality, address.administrativeArea, address.postalCode, address.regionCode]
     .filter(Boolean)
     .join(', ')
-}
-
-async function fetchPlacesFallback(placeId: string) {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
-  if (!apiKey) throw new Error('Missing GOOGLE_MAPS_API_KEY for Places fallback')
-
-  const url = new URL('https://maps.googleapis.com/maps/api/place/details/json')
-  url.searchParams.set('place_id', placeId)
-  url.searchParams.set('fields', 'name,formatted_address,formatted_phone_number,website,rating,user_ratings_total,reviews,place_id')
-  url.searchParams.set('reviews_sort', 'newest')
-  url.searchParams.set('key', apiKey)
-
-  const response = await fetch(url)
-  const payload = await response.json()
-
-  if (!response.ok || payload.status !== 'OK') {
-    throw new Error(payload.error_message || payload.status || 'Google Places sync failed')
-  }
-
-  const place = payload.result || {}
-  const reviews: NormalizedReview[] = (Array.isArray(place.reviews) ? place.reviews : [])
-    .map((review: any) => ({
-      reviewer: review.author_name || 'Google user',
-      stars: Number(review.rating || 0),
-      text: review.text || null,
-      reviewDate: review.time ? new Date(review.time * 1000) : new Date(),
-      replied: false,
-      replyText: null,
-    }))
-    .filter((review: NormalizedReview) => review.stars > 0)
-
-  return { place, reviews }
-}
-
-async function saveReviews(locationId: string, reviews: NormalizedReview[], reviewIdMap: Record<string, string>) {
-  const newReviews: Array<{ reviewer: string; stars: number; text: string | null; review_date: string }> = []
-
-  for (const review of reviews) {
-    const mappedReviewId = review.externalId ? reviewIdMap[review.externalId] : ''
-    const existingById = mappedReviewId
-      ? await prisma.review.findUnique({ where: { id: mappedReviewId } })
-      : null
-    const existing = existingById || await prisma.review.findFirst({
-      where: {
-        locationId,
-        reviewer: review.reviewer,
-        reviewDate: review.reviewDate,
-      },
-    })
-
-    const data = {
-      reviewer: review.reviewer,
-      stars: review.stars,
-      reviewText: review.text,
-      sentiment: sentimentFromRating(review.stars),
-      replied: review.replied,
-      replyText: review.replyText,
-      reviewDate: review.reviewDate,
-    }
-
-    if (existing) {
-      await prisma.review.update({ where: { id: existing.id }, data })
-      if (review.externalId) reviewIdMap[review.externalId] = existing.id
-      continue
-    }
-
-    const created = await prisma.review.create({ data: { locationId, ...data } })
-    if (review.externalId) reviewIdMap[review.externalId] = created.id
-    newReviews.push({
-      reviewer: review.reviewer,
-      stars: review.stars,
-      text: review.text,
-      review_date: review.reviewDate.toISOString(),
-    })
-  }
-
-  return newReviews
 }
 
 export async function POST(
@@ -139,6 +48,8 @@ export async function POST(
         name: true,
         gbpId: true,
         gbpConnected: true,
+        gbpReviewCount: true,
+        lastSynced: true,
       },
     })
 
@@ -203,7 +114,7 @@ export async function POST(
 
     let place: any = null
     try {
-      const fallback = await fetchPlacesFallback(client.gbpId)
+      const fallback = await fetchGooglePlacesReviewSnapshot(client.gbpId)
       place = fallback.place
       if (source === 'places_fallback') normalizedReviews = fallback.reviews
     } catch (error: any) {
@@ -221,13 +132,32 @@ export async function POST(
       }
     }
 
-    const newReviews = await saveReviews(client.id, normalizedReviews, reviewIdMap)
+    const { newReviews: savedNewReviews } = await saveNormalizedReviews(client.id, normalizedReviews, reviewIdMap)
     if (source === 'google_business_profile') {
       await setSetting(`gbp_review_id_map_${client.id}`, JSON.stringify(reviewIdMap))
     }
     const gbpReviewCount = source === 'google_business_profile'
       ? normalizedReviews.length
       : Number(place?.user_ratings_total || normalizedReviews.length)
+    const hadPreviousSync = Boolean(client.lastSynced)
+    const previousReviewCount = Number(client.gbpReviewCount || 0)
+    const reviewCountIncrease = hadPreviousSync
+      ? Math.max(0, gbpReviewCount - previousReviewCount)
+      : 0
+    const newReviews = hadPreviousSync
+      ? savedNewReviews.filter(review => new Date(review.review_date) > client.lastSynced!)
+      : []
+    const newReviewCount = calculateNewReviewCount({
+      hadPreviousSync,
+      previousTotal: previousReviewCount,
+      currentTotal: gbpReviewCount,
+      newDetailsCount: newReviews.length,
+    })
+
+    if (newReviewCount > newReviews.length) {
+      const detailWarning = `Google reports ${newReviewCount} new review${newReviewCount === 1 ? '' : 's'}, but this sync returned details for ${newReviews.length}.`
+      warning = [warning, detailWarning].filter(Boolean).join(' ')
+    }
     const managedPhone = managedDetails?.phoneNumbers?.primaryPhone
     const managedAddress = formatAddress(managedDetails?.storefrontAddress)
 
@@ -240,9 +170,10 @@ export async function POST(
         website: managedDetails?.websiteUri || place?.website || undefined,
         gbpRating: place?.rating ? Number(place.rating) : undefined,
         gbpReviewCount,
+        gbpNewReviewCount: newReviewCount,
         lastSynced: new Date(),
       },
-      select: { name: true, lastSynced: true, gbpRating: true, gbpReviewCount: true },
+      select: { name: true, lastSynced: true, gbpRating: true, gbpReviewCount: true, gbpNewReviewCount: true },
     })
 
     return NextResponse.json({
@@ -250,12 +181,19 @@ export async function POST(
       source,
       fallback: source === 'places_fallback',
       warning: warning || null,
-      new_review_count: newReviews.length,
+      new_review_count: newReviewCount,
       new_reviews: newReviews,
       fetched_review_count: normalizedReviews.length,
-      message: `Synced ${synced.name} - ${newReviews.length} new review${newReviews.length === 1 ? '' : 's'}`,
+      previous_review_count: previousReviewCount,
+      total_review_count: synced.gbpReviewCount,
+      review_count_change: reviewCountIncrease,
+      message: `Synced ${synced.name} - ${newReviewCount} new review${newReviewCount === 1 ? '' : 's'}`,
       synced_at: synced.lastSynced?.toISOString(),
-      details: { rating: synced.gbpRating, review_count: synced.gbpReviewCount },
+      details: {
+        rating: synced.gbpRating,
+        review_count: synced.gbpReviewCount,
+        new_review_count: synced.gbpNewReviewCount,
+      },
     })
   } catch (error: any) {
     console.error('Sync error:', error)

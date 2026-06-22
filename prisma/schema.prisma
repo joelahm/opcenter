@@ -9,23 +9,24 @@ datasource db {
 
 // ─── Locations / Clients ──────────────────────────────────────────────────────
 model Location {
-  id           String         @id @default(uuid())
-  name         String
-  gbpId        String?        @unique @map("gbp_id") @db.VarChar(255)
-  address      String?        @db.VarChar(500)
-  phone        String?        @db.VarChar(50)
-  website      String?        @db.VarChar(500)
-  campaign     String?
-  status       LocationStatus @default(active)
-  gbpConnected Boolean        @default(false) @map("gbp_connected")
-  gbpRating    Float?         @map("gbp_rating")
-  gbpReviewCount Int          @default(0) @map("gbp_review_count")
-  lastSynced   DateTime?      @map("last_synced")
-  createdAt    DateTime       @default(now()) @map("created_at")
-  updatedAt    DateTime       @updatedAt @map("updated_at")
-  reviews      Review[]
-  tasks        Task[]
-  patientList  PatientList?
+  id                String         @id @default(uuid())
+  name              String
+  gbpId             String?        @unique @map("gbp_id") @db.VarChar(255)
+  address           String?        @db.VarChar(500)
+  phone             String?        @db.VarChar(50)
+  website           String?        @db.VarChar(500)
+  campaign          String?
+  status            LocationStatus @default(active)
+  gbpConnected      Boolean        @default(false) @map("gbp_connected")
+  gbpRating         Float?         @map("gbp_rating")
+  gbpReviewCount    Int            @default(0) @map("gbp_review_count")
+  gbpNewReviewCount Int            @default(0) @map("gbp_new_review_count")
+  lastSynced        DateTime?      @map("last_synced")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+  reviews           Review[]
+  tasks             Task[]
+  patientList       PatientList?
 
   @@map("locations")
 }
@@ -36,7 +37,7 @@ model Campaign {
   name       String
   status     CampaignStatus @default(active)
   emailsSent Int            @default(0) @map("emails_sent")
-  openRate   Decimal        @default(0) @db.Decimal(5, 2) @map("open_rate")
+  openRate   Decimal        @default(0) @map("open_rate") @db.Decimal(5, 2)
   createdAt  DateTime       @default(now()) @map("created_at")
   updatedAt  DateTime       @updatedAt @map("updated_at")
 
@@ -49,10 +50,10 @@ model Review {
   locationId String?         @map("location_id")
   reviewer   String?
   stars      Int             @db.TinyInt
-  reviewText String?         @db.Text @map("review_text")
+  reviewText String?         @map("review_text") @db.Text
   sentiment  ReviewSentiment @default(neutral)
   replied    Boolean         @default(false)
-  replyText  String?         @db.Text @map("reply_text")
+  replyText  String?         @map("reply_text") @db.Text
   campaign   String?
   reviewDate DateTime?       @map("review_date")
   createdAt  DateTime        @default(now()) @map("created_at")
@@ -135,16 +136,16 @@ model Patient {
 
 // ─── Auth / Settings ──────────────────────────────────────────────────────────
 model User {
-  id           String    @id @default(uuid())
-  email        String    @unique
+  id           String     @id @default(uuid())
+  email        String     @unique
   name         String
-  passwordHash String    @map("password_hash") @db.VarChar(500)
-  role         UserRole  @default(member)
+  passwordHash String     @map("password_hash") @db.VarChar(500)
+  role         UserRole   @default(member)
   status       UserStatus @default(active)
-  lastLoginAt  DateTime? @map("last_login_at")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
-  invitesSent  Invite[]  @relation("InviteSender")
+  lastLoginAt  DateTime?  @map("last_login_at")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+  invitesSent  Invite[]   @relation("InviteSender")
 
   @@map("users")
 }
@@ -174,24 +175,24 @@ model AppSetting {
 }
 
 model DailySummaryLog {
-  id          String   @id @default(uuid())
+  id          String        @id @default(uuid())
   status      SummaryStatus
-  message     String?  @db.Text
-  payload     String?  @db.Text
-  deliveredAt DateTime @default(now()) @map("delivered_at")
+  message     String?       @db.Text
+  payload     String?       @db.Text
+  deliveredAt DateTime      @default(now()) @map("delivered_at")
 
   @@map("daily_summary_logs")
 }
 
 model EmailOtp {
-  id         String    @id @default(uuid())
-  userId     String    @map("user_id")
+  id         String     @id @default(uuid())
+  userId     String     @map("user_id")
   email      String
-  codeHash   String    @map("code_hash") @db.VarChar(500)
+  codeHash   String     @map("code_hash") @db.VarChar(500)
   purpose    OtpPurpose @default(email_change)
-  expiresAt  DateTime  @map("expires_at")
-  consumedAt DateTime? @map("consumed_at")
-  createdAt  DateTime  @default(now()) @map("created_at")
+  expiresAt  DateTime   @map("expires_at")
+  consumedAt DateTime?  @map("consumed_at")
+  createdAt  DateTime   @default(now()) @map("created_at")
 
   @@index([userId, email, purpose])
   @@map("email_otps")

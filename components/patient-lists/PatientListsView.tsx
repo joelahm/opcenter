@@ -1,8 +1,9 @@
 'use client'
 import { useCallback, useState } from 'react'
 import Link from 'next/link'
-import { Download, Eye, RefreshCw, Upload, Users, CalendarClock, Trash2 } from 'lucide-react'
+import { Download, Eye, RefreshCw, Upload, Users, CalendarClock, Trash2, Search, ChevronDown, ChevronRight } from 'lucide-react'
 import ImportPatientListModal from './ImportPatientListModal'
+import { clientGroupKey, sharedClientGroupName } from '@/lib/client-group'
 
 interface PatientListRow {
   id: string
@@ -43,6 +44,8 @@ export default function PatientListsView({ initialLists, initialAvailableClients
   const [refetching, setRefetching] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [message, setMessage] = useState<{ id: string; ok: boolean; text: string } | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
 
   const refresh = useCallback(async () => {
     const res = await fetch('/api/patient-lists')
@@ -100,6 +103,35 @@ export default function PatientListsView({ initialLists, initialAvailableClients
 
   const totalPatients = lists.reduce((sum, list) => sum + Number(list.total_patients || 0), 0)
   const newPatients = lists.reduce((sum, list) => sum + Number(list.new_patients || 0), 0)
+  const normalizedSearch = searchQuery.trim().toLocaleLowerCase()
+  const groupMap = new Map<string, { key: string; name: string; lists: PatientListRow[] }>()
+  const knownClientNames = lists.map(list => list.client_name)
+
+  lists
+    .filter(list => list.client_name.toLocaleLowerCase().includes(normalizedSearch))
+    .forEach(list => {
+      const name = sharedClientGroupName(list.client_name, knownClientNames)
+      const key = clientGroupKey(name)
+      const group = groupMap.get(key)
+      if (group) group.lists.push(list)
+      else groupMap.set(key, { key, name, lists: [list] })
+    })
+
+  const displayListGroups = Array.from(groupMap.values())
+    .map(group => ({
+      ...group,
+      lists: group.lists.sort((a, b) => a.client_name.localeCompare(b.client_name, undefined, { sensitivity: 'base' })),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+
+  function toggleGroup(key: string) {
+    setExpandedGroups(current => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
 
   return (
     <>
@@ -131,12 +163,24 @@ export default function PatientListsView({ initialLists, initialAvailableClients
             Client patient lists
             <span className="ml-2 text-[11px] font-normal text-gray-400">{lists.length} connected</span>
           </div>
-          <button
-            onClick={() => setShowImport(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 transition-all"
-          >
-            <Upload size={12} /> Import client patient list
-          </button>
+          <div className="flex items-center gap-2">
+            <div className="relative w-56">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                value={searchQuery}
+                onChange={event => setSearchQuery(event.target.value)}
+                placeholder="Search client name"
+                aria-label="Search patient lists by client name"
+                className="w-full h-8 pl-8 pr-3 border border-gray-200 rounded-lg text-xs text-gray-700 placeholder:text-gray-400 focus:outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-50"
+              />
+            </div>
+            <button
+              onClick={() => setShowImport(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 transition-all"
+            >
+              <Upload size={12} /> Import client patient list
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-[1.5fr_1.8fr_0.9fr_0.9fr_1fr_1.7fr] gap-3 px-4 py-2 bg-gray-50 border-b border-gray-100 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
@@ -149,15 +193,43 @@ export default function PatientListsView({ initialLists, initialAvailableClients
         </div>
 
         <div className="divide-y divide-gray-50">
-          {lists.length === 0 ? (
+          {displayListGroups.length === 0 ? (
             <div className="py-14 text-center">
               <div className="w-12 h-12 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
                 <Users size={20} className="text-gray-300" />
               </div>
-              <div className="text-sm font-medium text-gray-500 mb-1">No patient lists yet</div>
-              <div className="text-xs text-gray-400">Import a Google Sheet to connect one.</div>
+              <div className="text-sm font-medium text-gray-500 mb-1">
+                {lists.length === 0 ? 'No patient lists yet' : 'No matching clients'}
+              </div>
+              <div className="text-xs text-gray-400">
+                {lists.length === 0 ? 'Import a Google Sheet to connect one.' : 'Try a different client name'}
+              </div>
             </div>
-          ) : lists.map(list => {
+          ) : displayListGroups.map(group => {
+            const expanded = Boolean(normalizedSearch) || expandedGroups.has(group.key)
+            const groupPatients = group.lists.reduce((sum, list) => sum + Number(list.total_patients || 0), 0)
+            const groupNewPatients = group.lists.reduce((sum, list) => sum + Number(list.new_patients || 0), 0)
+
+            return (
+              <div key={group.key}>
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(group.key)}
+                  aria-expanded={expanded}
+                  className="w-full flex items-center justify-between gap-3 px-4 py-2.5 bg-gray-50/80 hover:bg-gray-100 border-b border-gray-100 text-left transition-colors"
+                >
+                  <span className="flex items-center gap-2 min-w-0">
+                    {expanded ? <ChevronDown size={14} className="text-gray-400 flex-shrink-0" /> : <ChevronRight size={14} className="text-gray-400 flex-shrink-0" />}
+                    <span className="text-xs font-semibold text-gray-800 truncate">{group.name}</span>
+                  </span>
+                  <span className="text-[10px] font-medium text-gray-400">
+                    {group.lists.length} {group.lists.length === 1 ? 'list' : 'lists'} · {groupPatients} patients
+                    {groupNewPatients > 0 ? ` · ${groupNewPatients} new` : ''}
+                  </span>
+                </button>
+
+                {expanded && <div className="divide-y divide-gray-50">
+                  {group.lists.map(list => {
             const isRefetching = refetching === list.id
             const isDeleting = deleting === list.id
             const rowMessage = message?.id === list.id ? message : null
@@ -243,6 +315,10 @@ export default function PatientListsView({ initialLists, initialAvailableClients
                     </span>
                   )}
                 </div>
+              </div>
+            )
+                  })}
+                </div>}
               </div>
             )
           })}

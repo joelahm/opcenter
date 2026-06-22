@@ -37,8 +37,6 @@ export async function getGbpReviewData(locationId?: string | null) {
     }
   }
 
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-
   const [
     aggregate,
     starGroups,
@@ -68,7 +66,6 @@ export async function getGbpReviewData(locationId?: string | null) {
       SELECT DATE(review_date) AS day, COUNT(*) AS count
       FROM reviews
       WHERE location_id = ${selected.id}
-        AND review_date >= ${thirtyDaysAgo}
       GROUP BY DATE(review_date)
       ORDER BY day ASC
     `,

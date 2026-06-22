@@ -8,6 +8,7 @@ async function getClients() {
   const rows = await prisma.$queryRaw<any[]>`
     SELECT
       l.*,
+      (SELECT pl.id FROM patient_lists pl WHERE pl.location_id = l.id LIMIT 1) AS patient_list_id,
       COUNT(r.id)                                         AS total_reviews,
       AVG(r.stars)                                        AS avg_rating,
       SUM(CASE WHEN r.replied = TRUE  THEN 1 ELSE 0 END) AS replied_count,

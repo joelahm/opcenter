@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS locations (
   gbp_connected BOOLEAN   DEFAULT FALSE,
   gbp_rating    DOUBLE NULL,
   gbp_review_count INT DEFAULT 0,
+  gbp_new_review_count INT DEFAULT 0,
   last_synced   TIMESTAMP NULL,
   created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -165,6 +166,7 @@ CREATE TABLE IF NOT EXISTS email_otps (
 -- ALTER TABLE locations ADD COLUMN IF NOT EXISTS phone         VARCHAR(50)  AFTER address;
 -- ALTER TABLE locations ADD COLUMN IF NOT EXISTS website       VARCHAR(500) AFTER phone;
 -- ALTER TABLE locations ADD COLUMN IF NOT EXISTS gbp_connected BOOLEAN      DEFAULT FALSE AFTER status;
+-- ALTER TABLE locations ADD COLUMN IF NOT EXISTS gbp_new_review_count INT   DEFAULT 0 AFTER gbp_review_count;
 -- ALTER TABLE locations ADD COLUMN IF NOT EXISTS last_synced   TIMESTAMP    NULL AFTER gbp_connected;
 -- ALTER TABLE locations MODIFY COLUMN gbp_id VARCHAR(255) UNIQUE;
 -- Also create patient_lists and patients tables above for existing databases.

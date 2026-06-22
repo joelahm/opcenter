@@ -1,21 +1,4 @@
 services:
-  app:
-    build: .
-    container_name: fritzie_app
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: mysql://fritzie:fritzie123@db:3306/fritzie_dashboard
-      APP_URL: ${APP_URL:-http://localhost:3000}
-    ports:
-      - "3000:3000"
-    depends_on:
-      db:
-        condition: service_healthy
-    volumes:
-      - task_uploads:/app/storage
-
   db:
     image: mysql:8.0
     container_name: fritzie_db
@@ -38,4 +21,3 @@ services:
 
 volumes:
   mysql_data:
-  task_uploads:

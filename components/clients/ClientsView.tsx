@@ -4,10 +4,11 @@ import Link from 'next/link'
 import {
   Upload, UserPlus, Link2, Eye, Users,
   RefreshCw, CheckCircle, XCircle, Star, MessageCircle, Clock, Wifi, WifiOff,
-  Trash2, X, MapPin, Phone, Globe, Loader2, ExternalLink
+  Trash2, X, MapPin, Phone, Globe, Loader2, ExternalLink, Search, ChevronDown, ChevronRight, AlertCircle
 } from 'lucide-react'
 import AddClientModal from './AddClientModal'
 import ImportModal    from './ImportModal'
+import { clientGroupKey, sharedClientGroupName } from '@/lib/client-group'
 
 interface Client {
   id: string
@@ -20,6 +21,8 @@ interface Client {
   gbp_connected: boolean
   gbp_rating?: number | null
   gbp_review_count?: number | null
+  gbp_new_review_count?: number | null
+  patient_list_id?: string | null
   last_synced: string | null
   total_reviews: number
   avg_rating: number
@@ -45,6 +48,9 @@ interface SyncResult {
   warning: string | null
   new_review_count: number
   fetched_review_count: number
+  previous_review_count: number
+  total_review_count: number
+  review_count_change: number
   new_reviews: {
     reviewer: string
     stars: number
@@ -63,6 +69,13 @@ function formatDate(value: string | null | undefined) {
   return new Date(value).toLocaleDateString()
 }
 
+function displayGbpReviewCount(client: Client) {
+  if (client.gbp_connected && client.gbp_review_count != null) {
+    return Number(client.gbp_review_count) || 0
+  }
+  return Number(client.total_reviews) || 0
+}
+
 export default function ClientsView({ initialClients, role }: Props) {
   const canManage = role === 'super_admin' || role === 'admin'
   const canDelete = role === 'super_admin'
@@ -76,6 +89,9 @@ export default function ClientsView({ initialClients, role }: Props) {
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null)
   const [deleting, setDeleting]     = useState<string | null>(null)
   const [syncMsg, setSyncMsg]       = useState<{ id: string; ok: boolean; text: string } | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+  const [missingPatientListClient, setMissingPatientListClient] = useState<Client | null>(null)
 
   const refresh = useCallback(async () => {
     const res  = await fetch('/api/clients')
@@ -116,6 +132,9 @@ export default function ClientsView({ initialClients, role }: Props) {
           warning: data.warning || null,
           new_review_count: data.new_review_count || 0,
           fetched_review_count: data.fetched_review_count || 0,
+          previous_review_count: data.previous_review_count || 0,
+          total_review_count: data.total_review_count || 0,
+          review_count_change: data.review_count_change || 0,
           new_reviews: data.new_reviews || [],
         })
         await refresh()
@@ -160,15 +179,38 @@ export default function ClientsView({ initialClients, role }: Props) {
 
   const connected   = clients.filter(c => c.gbp_connected).length
   const needsAtt    = clients.filter(c => c.status === 'needs_attention').length
-  const totalReviews = clients.reduce((a, c) => a + Number(c.total_reviews || 0), 0)
-  const avgRating    = clients.length
-    ? (clients.reduce((a, c) => a + parseFloat(String(c.avg_rating || 0)), 0) / clients.length).toFixed(1)
-    : '0.0'
-  const displayClients = [...clients].sort((a, b) => {
-    const byName = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
-    if (byName !== 0) return byName
-    return (a.address || '').localeCompare(b.address || '', undefined, { sensitivity: 'base' })
-  })
+  const totalReviews = clients.reduce((sum, client) => sum + displayGbpReviewCount(client), 0)
+  const normalizedSearch = searchQuery.trim().toLocaleLowerCase()
+  const groupMap = new Map<string, { key: string; name: string; locations: Client[] }>()
+  const knownClientNames = clients.map(client => client.name)
+
+  clients
+    .filter(client => client.name.toLocaleLowerCase().includes(normalizedSearch))
+    .forEach(client => {
+      const name = sharedClientGroupName(client.name, knownClientNames)
+      const key = clientGroupKey(name)
+      const group = groupMap.get(key)
+      if (group) group.locations.push(client)
+      else groupMap.set(key, { key, name, locations: [client] })
+    })
+
+  const displayClientGroups = Array.from(groupMap.values())
+    .map(group => ({
+      ...group,
+      locations: group.locations.sort((a, b) =>
+        (a.address || '').localeCompare(b.address || '', undefined, { sensitivity: 'base' })
+      ),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+
+  function toggleGroup(key: string) {
+    setExpandedGroups(current => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
 
   return (
     <>
@@ -204,7 +246,18 @@ export default function ClientsView({ initialClients, role }: Props) {
             All clients
             <span className="ml-2 text-[11px] font-normal text-gray-400">{clients.length} total</span>
           </div>
-          {canManage && <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
+            <div className="relative w-56">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                value={searchQuery}
+                onChange={event => setSearchQuery(event.target.value)}
+                placeholder="Search client name"
+                aria-label="Search clients by name"
+                className="w-full h-8 pl-8 pr-3 border border-gray-200 rounded-lg text-xs text-gray-700 placeholder:text-gray-400 focus:outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-50"
+              />
+            </div>
+          {canManage && <>
             <button
               onClick={() => setShowImport(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition-all"
@@ -217,15 +270,17 @@ export default function ClientsView({ initialClients, role }: Props) {
             >
               <UserPlus size={12} /> Add client
             </button>
-          </div>}
+          </>}
+          </div>
         </div>
 
         {/* Column headers */}
-        <div className="grid grid-cols-[2.1fr_1.1fr_1fr_1fr_0.8fr_1fr_1.4fr] gap-3 px-4 py-2 bg-gray-50 border-b border-gray-100 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+        <div className="grid grid-cols-[2fr_1fr_0.9fr_0.7fr_0.8fr_0.7fr_0.9fr_1.4fr] gap-3 px-4 py-2 bg-gray-50 border-b border-gray-100 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
           <span>Client</span>
           <span>Patient lists</span>
           <span>GBP Status</span>
-          <span>Reviews</span>
+          <span>Total reviews</span>
+          <span>New reviews</span>
           <span>Rating</span>
           <span>Last synced</span>
           <span>Actions</span>
@@ -233,18 +288,42 @@ export default function ClientsView({ initialClients, role }: Props) {
 
         {/* Rows */}
         <div className="divide-y divide-gray-50">
-          {clients.length === 0 ? (
+          {displayClientGroups.length === 0 ? (
             <div className="py-14 text-center">
               <div className="w-12 h-12 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
                 <UserPlus size={20} className="text-gray-300" />
               </div>
-              <div className="text-sm font-medium text-gray-500 mb-1">No clients yet</div>
-              <div className="text-xs text-gray-400">Add one manually or import a CSV</div>
+              <div className="text-sm font-medium text-gray-500 mb-1">
+                {clients.length === 0 ? 'No clients yet' : 'No matching clients'}
+              </div>
+              <div className="text-xs text-gray-400">
+                {clients.length === 0 ? 'Add one manually or import a CSV' : 'Try a different client name'}
+              </div>
             </div>
-          ) : displayClients.map(c => {
-            const total     = Number(c.total_reviews)   || 0
-            const unreplied = Number(c.unreplied_count) || 0
-            const avg       = parseFloat(String(c.avg_rating || 0)).toFixed(1)
+          ) : displayClientGroups.map(group => {
+            const expanded = Boolean(normalizedSearch) || expandedGroups.has(group.key)
+
+            return (
+              <div key={group.key}>
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(group.key)}
+                  aria-expanded={expanded}
+                  className="w-full flex items-center justify-between gap-3 px-4 py-2.5 bg-gray-50/80 hover:bg-gray-100 border-b border-gray-100 text-left transition-colors"
+                >
+                  <span className="flex items-center gap-2 min-w-0">
+                    {expanded ? <ChevronDown size={14} className="text-gray-400 flex-shrink-0" /> : <ChevronRight size={14} className="text-gray-400 flex-shrink-0" />}
+                    <span className="text-xs font-semibold text-gray-800 truncate">{group.name}</span>
+                  </span>
+                  <span className="text-[10px] font-medium text-gray-400">
+                    {group.locations.length} {group.locations.length === 1 ? 'location' : 'locations'}
+                  </span>
+                </button>
+
+                {expanded && <div className="divide-y divide-gray-50">
+                  {group.locations.map(c => {
+            const total     = displayGbpReviewCount(c)
+            const rating    = Number(c.gbp_rating ?? c.avg_rating ?? 0).toFixed(1)
             const isSyncing = syncing === c.id
             const isDeleting = deleting === c.id
             const msg       = syncMsg?.id === c.id ? syncMsg : null
@@ -252,7 +331,7 @@ export default function ClientsView({ initialClients, role }: Props) {
             return (
               <div
                 key={c.id}
-                className="grid grid-cols-[2.1fr_1.1fr_1fr_1fr_0.8fr_1fr_1.4fr] gap-3 px-4 py-3 hover:bg-gray-50/70 transition-colors items-center"
+                className="grid grid-cols-[2fr_1fr_0.9fr_0.7fr_0.8fr_0.7fr_0.9fr_1.4fr] gap-3 px-4 py-3 hover:bg-gray-50/70 transition-colors items-center"
               >
                 {/* Name + address */}
                 <div className="min-w-0">
@@ -272,12 +351,22 @@ export default function ClientsView({ initialClients, role }: Props) {
                 {/* Patient lists */}
                 <div>
                   {canManage ? (
-                    <Link
-                      href="/patient-lists"
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-600 text-[11px] font-medium hover:bg-blue-100 transition-all"
-                    >
-                      <Users size={11} /> List
-                    </Link>
+                    c.patient_list_id ? (
+                      <Link
+                        href={`/patient-lists/${c.patient_list_id}`}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-600 text-[11px] font-medium hover:bg-blue-100 transition-all"
+                      >
+                        <Users size={11} /> List
+                      </Link>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setMissingPatientListClient(c)}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-50 text-gray-500 text-[11px] font-medium hover:bg-gray-100 transition-all"
+                      >
+                        <Users size={11} /> List
+                      </button>
+                    )
                   ) : <span className="text-[11px] text-gray-300">Restricted</span>}
                 </div>
 
@@ -297,17 +386,17 @@ export default function ClientsView({ initialClients, role }: Props) {
                 {/* Reviews */}
                 <div className="text-xs font-mono text-gray-700">
                   {total}
-                  {unreplied > 0 && (
-                    <span className="ml-1.5 text-[10px] font-bold px-1 py-0.5 rounded font-mono bg-red-100 text-red-600">
-                      {unreplied} unreplied
-                    </span>
-                  )}
+                </div>
+
+                {/* New reviews from the most recent sync */}
+                <div className={`text-xs font-mono ${Number(c.gbp_new_review_count || 0) > 0 ? 'font-semibold text-green-600' : 'text-gray-400'}`}>
+                  {Number(c.gbp_new_review_count || 0)}
                 </div>
 
                 {/* Rating */}
                 <div className="flex items-center gap-1">
                   <Star size={11} className="text-amber-400 fill-amber-400" />
-                  <span className="text-xs font-mono text-gray-700">{avg}</span>
+                  <span className="text-xs font-mono text-gray-700">{rating}</span>
                 </div>
 
                 {/* Last synced */}
@@ -364,6 +453,10 @@ export default function ClientsView({ initialClients, role }: Props) {
                 </div>
               </div>
             )
+                  })}
+                </div>}
+              </div>
+            )
           })}
         </div>
       </div>
@@ -378,6 +471,45 @@ export default function ClientsView({ initialClients, role }: Props) {
           onClose={() => setLinkClient(null)}
           onLinked={handleLinked}
         />
+      )}
+
+      {missingPatientListClient && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/35 flex items-center justify-center p-4"
+          onClick={() => setMissingPatientListClient(null)}
+        >
+          <div
+            className="w-full max-w-sm bg-white rounded-xl shadow-2xl"
+            onClick={event => event.stopPropagation()}
+          >
+            <div className="flex items-start gap-3 p-5">
+              <div className="w-9 h-9 flex items-center justify-center rounded-lg bg-amber-50 text-amber-600 flex-shrink-0">
+                <AlertCircle size={17} />
+              </div>
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-gray-900">No patient list</div>
+                <div className="text-xs text-gray-500 leading-relaxed mt-1">
+                  No patient list is configured or added for {missingPatientListClient.name}.
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 px-5 pb-5">
+              <button
+                type="button"
+                onClick={() => setMissingPatientListClient(null)}
+                className="px-3 py-2 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50"
+              >
+                Close
+              </button>
+              <Link
+                href="/patient-lists"
+                className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700"
+              >
+                Add patient list
+              </Link>
+            </div>
+          </div>
+        </div>
       )}
 
       {(loadingDetails || details) && (
@@ -457,12 +589,12 @@ export default function ClientsView({ initialClients, role }: Props) {
                 <div className="grid grid-cols-3 gap-2">
                   <div className="border border-gray-200 rounded-xl p-3">
                     <Star size={14} className="text-amber-400 fill-amber-400 mb-2" />
-                    <div className="text-lg font-bold font-mono text-gray-900">{Number(details.gbp_rating || details.avg_rating || 0).toFixed(1)}</div>
+                    <div className="text-lg font-bold font-mono text-gray-900">{Number(details.gbp_rating ?? details.avg_rating ?? 0).toFixed(1)}</div>
                     <div className="text-[10px] text-gray-400">GBP rating</div>
                   </div>
                   <div className="border border-gray-200 rounded-xl p-3">
                     <MessageCircle size={14} className="text-blue-500 mb-2" />
-                    <div className="text-lg font-bold font-mono text-gray-900">{details.gbp_review_count || details.total_reviews || 0}</div>
+                    <div className="text-lg font-bold font-mono text-gray-900">{displayGbpReviewCount(details)}</div>
                     <div className="text-[10px] text-gray-400">GBP reviews</div>
                   </div>
                   <div className="border border-gray-200 rounded-xl p-3">
@@ -497,7 +629,7 @@ export default function ClientsView({ initialClients, role }: Props) {
                           </div>
                         </div>
                         {review.reviewText && (
-                          <div className="text-xs text-gray-500 leading-relaxed line-clamp-3">{review.reviewText}</div>
+                          <div className="text-xs text-gray-500 leading-relaxed whitespace-pre-wrap break-words">{review.reviewText}</div>
                         )}
                         <div className="text-[10px] text-gray-300 mt-2">{formatDate(review.reviewDate)}</div>
                       </div>
@@ -530,14 +662,18 @@ export default function ClientsView({ initialClients, role }: Props) {
             </div>
 
             <div className="p-5 overflow-y-auto space-y-4">
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-4 gap-2">
                 <div className="border border-gray-200 rounded-lg p-3">
                   <div className="text-lg font-bold font-mono text-gray-900">{syncResult.new_review_count}</div>
                   <div className="text-[10px] text-gray-400">New reviews</div>
                 </div>
                 <div className="border border-gray-200 rounded-lg p-3">
+                  <div className="text-lg font-bold font-mono text-gray-900">{syncResult.total_review_count}</div>
+                  <div className="text-[10px] text-gray-400">Total GBP</div>
+                </div>
+                <div className="border border-gray-200 rounded-lg p-3">
                   <div className="text-lg font-bold font-mono text-gray-900">{syncResult.fetched_review_count}</div>
-                  <div className="text-[10px] text-gray-400">Fetched</div>
+                  <div className="text-[10px] text-gray-400">Details fetched</div>
                 </div>
                 <div className="border border-gray-200 rounded-lg p-3">
                   <div className={`text-xs font-semibold mt-1 ${
@@ -556,10 +692,19 @@ export default function ClientsView({ initialClients, role }: Props) {
               )}
 
               <div>
-                <div className="text-xs font-semibold text-gray-700 mb-2">New reviews</div>
+                <div className="text-xs font-semibold text-gray-700 mb-2">
+                  New review details
+                  {syncResult.new_review_count > 0 && (
+                    <span className="ml-1 font-normal text-gray-400">
+                      ({syncResult.new_reviews.length} of {syncResult.new_review_count} available)
+                    </span>
+                  )}
+                </div>
                 {syncResult.new_reviews.length === 0 ? (
                   <div className="py-8 text-center text-xs text-gray-400 border border-gray-100 rounded-lg">
-                    No new reviews since the previous sync.
+                    {syncResult.new_review_count > 0
+                      ? `Google reports ${syncResult.new_review_count} new review${syncResult.new_review_count === 1 ? '' : 's'}, but review details were not available from this sync.`
+                      : 'No new reviews since the previous sync.'}
                   </div>
                 ) : (
                   <div className="space-y-2">
