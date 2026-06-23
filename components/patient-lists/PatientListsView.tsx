@@ -1,9 +1,9 @@
 'use client'
 import { useCallback, useState } from 'react'
 import Link from 'next/link'
-import { Download, Eye, RefreshCw, Upload, Users, CalendarClock, Trash2, Search, ChevronDown, ChevronRight } from 'lucide-react'
+import { Download, Eye, RefreshCw, Upload, Users, CalendarClock, Trash2, Search } from 'lucide-react'
 import ImportPatientListModal from './ImportPatientListModal'
-import { clientGroupKey, sharedClientGroupName } from '@/lib/client-group'
+import { countUniqueClients, sharedClientGroupName } from '@/lib/client-group'
 
 interface PatientListRow {
   id: string
@@ -45,7 +45,6 @@ export default function PatientListsView({ initialLists, initialAvailableClients
   const [deleting, setDeleting] = useState<string | null>(null)
   const [message, setMessage] = useState<{ id: string; ok: boolean; text: string } | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
 
   const refresh = useCallback(async () => {
     const res = await fetch('/api/patient-lists')
@@ -104,40 +103,25 @@ export default function PatientListsView({ initialLists, initialAvailableClients
   const totalPatients = lists.reduce((sum, list) => sum + Number(list.total_patients || 0), 0)
   const newPatients = lists.reduce((sum, list) => sum + Number(list.new_patients || 0), 0)
   const normalizedSearch = searchQuery.trim().toLocaleLowerCase()
-  const groupMap = new Map<string, { key: string; name: string; lists: PatientListRow[] }>()
   const knownClientNames = lists.map(list => list.client_name)
-
-  lists
+  const connectedClients = countUniqueClients(knownClientNames)
+  const displayLists = lists
     .filter(list => list.client_name.toLocaleLowerCase().includes(normalizedSearch))
-    .forEach(list => {
-      const name = sharedClientGroupName(list.client_name, knownClientNames)
-      const key = clientGroupKey(name)
-      const group = groupMap.get(key)
-      if (group) group.lists.push(list)
-      else groupMap.set(key, { key, name, lists: [list] })
+    .sort((a, b) => {
+      const groupComparison = sharedClientGroupName(a.client_name, knownClientNames).localeCompare(
+        sharedClientGroupName(b.client_name, knownClientNames),
+        undefined,
+        { sensitivity: 'base' }
+      )
+      return groupComparison
+        || a.client_name.localeCompare(b.client_name, undefined, { sensitivity: 'base' })
     })
-
-  const displayListGroups = Array.from(groupMap.values())
-    .map(group => ({
-      ...group,
-      lists: group.lists.sort((a, b) => a.client_name.localeCompare(b.client_name, undefined, { sensitivity: 'base' })),
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
-
-  function toggleGroup(key: string) {
-    setExpandedGroups(current => {
-      const next = new Set(current)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }
 
   return (
     <>
       <div className="grid grid-cols-3 gap-3 p-5 pb-0">
         {[
-          { label: 'Connected lists', value: lists.length, icon: Users, bg: 'bg-indigo-50', ic: 'text-indigo-600', bar: 'bg-indigo-500', pct: 100 },
+          { label: 'Clients connected', value: connectedClients, icon: Users, bg: 'bg-indigo-50', ic: 'text-indigo-600', bar: 'bg-indigo-500', pct: 100 },
           { label: 'Total patients', value: totalPatients, icon: Users, bg: 'bg-blue-50', ic: 'text-blue-600', bar: 'bg-blue-500', pct: 80 },
           { label: 'New patients', value: newPatients, icon: CalendarClock, bg: 'bg-green-50', ic: 'text-green-600', bar: 'bg-green-500', pct: totalPatients ? Math.round((newPatients / totalPatients) * 100) : 0, vc: 'text-green-600' },
         ].map(metric => {
@@ -161,7 +145,7 @@ export default function PatientListsView({ initialLists, initialAvailableClients
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
           <div className="text-sm font-semibold text-gray-800">
             Client patient lists
-            <span className="ml-2 text-[11px] font-normal text-gray-400">{lists.length} connected</span>
+            <span className="ml-2 text-[11px] font-normal text-gray-400">{lists.length} location lists</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="relative w-56">
@@ -193,7 +177,7 @@ export default function PatientListsView({ initialLists, initialAvailableClients
         </div>
 
         <div className="divide-y divide-gray-50">
-          {displayListGroups.length === 0 ? (
+          {displayLists.length === 0 ? (
             <div className="py-14 text-center">
               <div className="w-12 h-12 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
                 <Users size={20} className="text-gray-300" />
@@ -205,31 +189,7 @@ export default function PatientListsView({ initialLists, initialAvailableClients
                 {lists.length === 0 ? 'Import a Google Sheet to connect one.' : 'Try a different client name'}
               </div>
             </div>
-          ) : displayListGroups.map(group => {
-            const expanded = Boolean(normalizedSearch) || expandedGroups.has(group.key)
-            const groupPatients = group.lists.reduce((sum, list) => sum + Number(list.total_patients || 0), 0)
-            const groupNewPatients = group.lists.reduce((sum, list) => sum + Number(list.new_patients || 0), 0)
-
-            return (
-              <div key={group.key}>
-                <button
-                  type="button"
-                  onClick={() => toggleGroup(group.key)}
-                  aria-expanded={expanded}
-                  className="w-full flex items-center justify-between gap-3 px-4 py-2.5 bg-gray-50/80 hover:bg-gray-100 border-b border-gray-100 text-left transition-colors"
-                >
-                  <span className="flex items-center gap-2 min-w-0">
-                    {expanded ? <ChevronDown size={14} className="text-gray-400 flex-shrink-0" /> : <ChevronRight size={14} className="text-gray-400 flex-shrink-0" />}
-                    <span className="text-xs font-semibold text-gray-800 truncate">{group.name}</span>
-                  </span>
-                  <span className="text-[10px] font-medium text-gray-400">
-                    {group.lists.length} {group.lists.length === 1 ? 'list' : 'lists'} · {groupPatients} patients
-                    {groupNewPatients > 0 ? ` · ${groupNewPatients} new` : ''}
-                  </span>
-                </button>
-
-                {expanded && <div className="divide-y divide-gray-50">
-                  {group.lists.map(list => {
+          ) : displayLists.map(list => {
             const isRefetching = refetching === list.id
             const isDeleting = deleting === list.id
             const rowMessage = message?.id === list.id ? message : null
@@ -315,10 +275,6 @@ export default function PatientListsView({ initialLists, initialAvailableClients
                     </span>
                   )}
                 </div>
-              </div>
-            )
-                  })}
-                </div>}
               </div>
             )
           })}

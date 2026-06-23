@@ -39,3 +39,9 @@ export function sharedClientGroupName(name: string, knownNames: string[]) {
 
   return candidates[0]?.name || ownName
 }
+
+export function countUniqueClients(names: string[]) {
+  return new Set(
+    names.map(name => clientGroupKey(sharedClientGroupName(name, names)))
+  ).size
+}

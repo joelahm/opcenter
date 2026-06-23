@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { clientGroupKey, clientGroupName, sharedClientGroupName } from '../lib/client-group'
+import { clientGroupKey, clientGroupName, countUniqueClients, sharedClientGroupName } from '../lib/client-group'
 
 test('location suffixes after the final separator share one client group', () => {
   const croydon = 'Flawless Feet Podiatry & Laser Clinic - Croydon'
@@ -32,4 +32,14 @@ test('isolated shared words do not group unrelated clients', () => {
 
   assert.equal(sharedClientGroupName(names[0], names), 'Hampstead Clinic')
   assert.equal(sharedClientGroupName(names[1], names), 'Croydon Clinic')
+})
+
+test('unique client count does not count multiple locations separately', () => {
+  const names = [
+    'Flawless Feet Podiatry & Laser Clinic - Croydon',
+    'Flawless Feet Podiatry & Laser Clinic - Sydenham',
+    'Hampstead Clinic',
+  ]
+
+  assert.equal(countUniqueClients(names), 2)
 })

@@ -4,11 +4,11 @@ import Link from 'next/link'
 import {
   Upload, UserPlus, Link2, Eye, Users,
   RefreshCw, CheckCircle, XCircle, Star, MessageCircle, Clock, Wifi, WifiOff,
-  Trash2, X, MapPin, Phone, Globe, Loader2, ExternalLink, Search, ChevronDown, ChevronRight, AlertCircle
+  Trash2, X, MapPin, Phone, Globe, Loader2, ExternalLink, Search, AlertCircle
 } from 'lucide-react'
 import AddClientModal from './AddClientModal'
 import ImportModal    from './ImportModal'
-import { clientGroupKey, sharedClientGroupName } from '@/lib/client-group'
+import { countUniqueClients, sharedClientGroupName } from '@/lib/client-group'
 
 interface Client {
   id: string
@@ -90,7 +90,6 @@ export default function ClientsView({ initialClients, role }: Props) {
   const [deleting, setDeleting]     = useState<string | null>(null)
   const [syncMsg, setSyncMsg]       = useState<{ id: string; ok: boolean; text: string } | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [missingPatientListClient, setMissingPatientListClient] = useState<Client | null>(null)
 
   const refresh = useCallback(async () => {
@@ -180,44 +179,28 @@ export default function ClientsView({ initialClients, role }: Props) {
   const connected   = clients.filter(c => c.gbp_connected).length
   const needsAtt    = clients.filter(c => c.status === 'needs_attention').length
   const totalReviews = clients.reduce((sum, client) => sum + displayGbpReviewCount(client), 0)
+  const uniqueClientCount = countUniqueClients(clients.map(client => client.name))
   const normalizedSearch = searchQuery.trim().toLocaleLowerCase()
-  const groupMap = new Map<string, { key: string; name: string; locations: Client[] }>()
   const knownClientNames = clients.map(client => client.name)
-
-  clients
+  const displayClients = clients
     .filter(client => client.name.toLocaleLowerCase().includes(normalizedSearch))
-    .forEach(client => {
-      const name = sharedClientGroupName(client.name, knownClientNames)
-      const key = clientGroupKey(name)
-      const group = groupMap.get(key)
-      if (group) group.locations.push(client)
-      else groupMap.set(key, { key, name, locations: [client] })
+    .sort((a, b) => {
+      const groupComparison = sharedClientGroupName(a.name, knownClientNames).localeCompare(
+        sharedClientGroupName(b.name, knownClientNames),
+        undefined,
+        { sensitivity: 'base' }
+      )
+      return groupComparison
+        || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+        || (a.address || '').localeCompare(b.address || '', undefined, { sensitivity: 'base' })
     })
-
-  const displayClientGroups = Array.from(groupMap.values())
-    .map(group => ({
-      ...group,
-      locations: group.locations.sort((a, b) =>
-        (a.address || '').localeCompare(b.address || '', undefined, { sensitivity: 'base' })
-      ),
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
-
-  function toggleGroup(key: string) {
-    setExpandedGroups(current => {
-      const next = new Set(current)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }
 
   return (
     <>
       {/* ── Metric strip ───────────────────────────────────────────── */}
       <div className="grid grid-cols-4 gap-3 p-5 pb-0">
         {[
-          { label: 'Total clients',    value: clients.length, icon: UserPlus,      bg: 'bg-indigo-50', ic: 'text-indigo-600', bar: 'bg-indigo-500', pct: 100 },
+          { label: 'Total clients',    value: uniqueClientCount, icon: UserPlus,   bg: 'bg-indigo-50', ic: 'text-indigo-600', bar: 'bg-indigo-500', pct: 100 },
           { label: 'GBP connected',    value: connected,      icon: Wifi,          bg: 'bg-green-50',  ic: 'text-green-600',  bar: 'bg-green-500',  pct: clients.length ? Math.round((connected/clients.length)*100) : 0, vc: 'text-green-600' },
           { label: 'Needs attention',  value: needsAtt,       icon: Clock,         bg: 'bg-red-50',    ic: 'text-red-600',    bar: 'bg-red-500',    pct: clients.length ? Math.round((needsAtt/clients.length)*100) : 0, vc: needsAtt ? 'text-red-600' : undefined },
           { label: 'Total reviews',    value: totalReviews,   icon: MessageCircle, bg: 'bg-blue-50',   ic: 'text-blue-600',   bar: 'bg-blue-500',   pct: 70 },
@@ -244,7 +227,7 @@ export default function ClientsView({ initialClients, role }: Props) {
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
           <div className="text-sm font-semibold text-gray-800">
             All clients
-            <span className="ml-2 text-[11px] font-normal text-gray-400">{clients.length} total</span>
+            <span className="ml-2 text-[11px] font-normal text-gray-400">{clients.length} locations</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="relative w-56">
@@ -288,7 +271,7 @@ export default function ClientsView({ initialClients, role }: Props) {
 
         {/* Rows */}
         <div className="divide-y divide-gray-50">
-          {displayClientGroups.length === 0 ? (
+          {displayClients.length === 0 ? (
             <div className="py-14 text-center">
               <div className="w-12 h-12 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
                 <UserPlus size={20} className="text-gray-300" />
@@ -300,28 +283,7 @@ export default function ClientsView({ initialClients, role }: Props) {
                 {clients.length === 0 ? 'Add one manually or import a CSV' : 'Try a different client name'}
               </div>
             </div>
-          ) : displayClientGroups.map(group => {
-            const expanded = Boolean(normalizedSearch) || expandedGroups.has(group.key)
-
-            return (
-              <div key={group.key}>
-                <button
-                  type="button"
-                  onClick={() => toggleGroup(group.key)}
-                  aria-expanded={expanded}
-                  className="w-full flex items-center justify-between gap-3 px-4 py-2.5 bg-gray-50/80 hover:bg-gray-100 border-b border-gray-100 text-left transition-colors"
-                >
-                  <span className="flex items-center gap-2 min-w-0">
-                    {expanded ? <ChevronDown size={14} className="text-gray-400 flex-shrink-0" /> : <ChevronRight size={14} className="text-gray-400 flex-shrink-0" />}
-                    <span className="text-xs font-semibold text-gray-800 truncate">{group.name}</span>
-                  </span>
-                  <span className="text-[10px] font-medium text-gray-400">
-                    {group.locations.length} {group.locations.length === 1 ? 'location' : 'locations'}
-                  </span>
-                </button>
-
-                {expanded && <div className="divide-y divide-gray-50">
-                  {group.locations.map(c => {
+          ) : displayClients.map(c => {
             const total     = displayGbpReviewCount(c)
             const rating    = Number(c.gbp_rating ?? c.avg_rating ?? 0).toFixed(1)
             const isSyncing = syncing === c.id
@@ -451,10 +413,6 @@ export default function ClientsView({ initialClients, role }: Props) {
                     </span>
                   )}
                 </div>
-              </div>
-            )
-                  })}
-                </div>}
               </div>
             )
           })}

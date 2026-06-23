@@ -2,6 +2,7 @@ import Topbar     from '@/components/dashboard/Topbar'
 import ClientsView from '@/components/clients/ClientsView'
 import prisma      from '@/lib/db'
 import { requireUser } from '@/lib/auth'
+import { countUniqueClients } from '@/lib/client-group'
 
 async function getClients() {
   // $queryRaw for AVG + COUNT aggregate per location — Prisma ORM can't do this in one typed call yet
@@ -33,12 +34,13 @@ export default async function ClientsPage() {
   const user = await requireUser()
   const clients = await getClients()
   const connected = clients.filter((c: any) => c.gbp_connected).length
+  const uniqueClients = countUniqueClients(clients.map((client: any) => client.name))
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <Topbar
         title="Clients"
-        subtitle={`${clients.length} clients · ${connected} GBP connected`}
+        subtitle={`${uniqueClients} clients · ${clients.length} locations · ${connected} GBP connected`}
       />
       <div className="flex-1 overflow-y-auto">
         <ClientsView initialClients={clients} role={user.role} />
